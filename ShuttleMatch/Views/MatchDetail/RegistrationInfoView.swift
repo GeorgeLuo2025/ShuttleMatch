@@ -4,6 +4,7 @@ import FirebaseAuth
 struct RegistrationInfoView: View {
     @ObservedObject var matchVM: MatchViewModel
     @State private var isShowingAddPlayer = false
+    @State private var showOddPlayerAlert = false
 
     @State private var matchName = ""
     @State private var useStandardScoring = true
@@ -82,39 +83,11 @@ struct RegistrationInfoView: View {
                     }
                 }
 
-                Section("registration_list_\(playerCount)") {
-                    if matchVM.players.isEmpty {
-                        Text(String(localized: "no_registration_add_players"))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(matchVM.players) { player in
-                            HStack {
-                                Text(player.displayName)
-                                Spacer()
-                                if player.id == match.organizerID {
-                                    Text(String(localized: "organizer_badge"))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .onDelete { indexSet in
-                            guard isRegistration && isOrganizer else { return }
-                            Task {
-                                for index in indexSet {
-                                    await matchVM.removePlayer(playerID: matchVM.players[index].id)
-                                }
-                            }
-                        }
-                    }
-
-                    if isOrganizer && isRegistration {
-                        Button {
-                            isShowingAddPlayer = true
-                        } label: {
-                            Label(String(localized: "add_player_button"), systemImage: "person.badge.plus")
-                        }
-                    }
+                // Player list — for team match, show by team if already assigned
+                if match.type == .team && !(match.teamA?.memberIDs.isEmpty ?? true) {
+                    teamPlayerSection(match: match)
+                } else {
+                    generalPlayerSection(match: match)
                 }
 
                 if isOrganizer && isRegistration && playerCount >= 2 && match.type != .team {
@@ -153,15 +126,82 @@ struct RegistrationInfoView: View {
         .sheet(isPresented: $isShowingAddPlayer) {
             AddPlayerView(matchVM: matchVM)
         }
+        .alert("Even Number of Players Required", isPresented: $showOddPlayerAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Team match requires an even number of players to split evenly into two teams. You currently have \(playerCount) players — please add or remove one.")
+        }
         .onAppear { initializeFromMatch() }
         .onChange(of: matchVM.currentMatch?.id) { _, _ in initializeFromMatch() }
     }
+
+    // MARK: - Player Sections
+
+    @ViewBuilder
+    private func generalPlayerSection(match: Match) -> some View {
+        Section("registration_list_\(playerCount)") {
+            if matchVM.players.isEmpty {
+                Text(String(localized: "no_registration_add_players"))
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(matchVM.players) { player in
+                    HStack {
+                        Text(player.displayName)
+                        Spacer()
+                        if player.id == match.organizerID {
+                            Text(String(localized: "organizer_badge"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .onDelete { indexSet in
+                    guard isRegistration && isOrganizer else { return }
+                    Task {
+                        for index in indexSet {
+                            await matchVM.removePlayer(playerID: matchVM.players[index].id)
+                        }
+                    }
+                }
+            }
+
+            if isOrganizer && isRegistration {
+                Button {
+                    isShowingAddPlayer = true
+                } label: {
+                    Label(String(localized: "add_player_button"), systemImage: "person.badge.plus")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func teamPlayerSection(match: Match) -> some View {
+        let teamAIDs = match.teamA?.memberIDs ?? []
+        let teamBIDs = match.teamB?.memberIDs ?? []
+        let teamAName = match.teamA?.name ?? "Team A"
+        let teamBName = match.teamB?.name ?? "Team B"
+
+        Section("\(teamAName) (\(teamAIDs.count)人)") {
+            ForEach(teamAIDs, id: \.self) { pid in
+                Text(matchVM.players.first(where: { $0.id == pid })?.displayName ?? pid)
+            }
+        }
+
+        Section("\(teamBName) (\(teamBIDs.count)人)") {
+            ForEach(teamBIDs, id: \.self) { pid in
+                Text(matchVM.players.first(where: { $0.id == pid })?.displayName ?? pid)
+            }
+        }
+    }
+
+    // MARK: - Helpers
 
     private var canGenerate: Bool {
         guard playerCount >= 2 else { return false }
         guard !matchName.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
         if match?.type == .team {
-            return !teamAName.isEmpty && !teamBName.isEmpty
+            return !teamAName.isEmpty && !teamBName.isEmpty && (singlesCount + doublesCount) > 0
         }
         return selectedRounds > 0
     }
@@ -207,6 +247,14 @@ struct RegistrationInfoView: View {
     private func saveSettings() {}
 
     private func generateMatchups() async {
+        // Team match: enforce even player count
+        if matchVM.currentMatch?.type == .team {
+            guard playerCount % 2 == 0 else {
+                showOddPlayerAlert = true
+                return
+            }
+        }
+
         let rule: ScoringRule = useStandardScoring ? .standard : ScoringRule(
             pointsPerGame: customPointsPerGame,
             gamesPerMatch: customGamesPerMatch,

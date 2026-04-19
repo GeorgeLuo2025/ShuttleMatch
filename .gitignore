@@ -1,0 +1,12 @@
+*.xcuserstate
+xcuserdata/
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+build/
+Pods/
+.build/
+GoogleService-Info.plist
+.DS_Store

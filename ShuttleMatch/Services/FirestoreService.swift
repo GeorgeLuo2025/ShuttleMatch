@@ -80,6 +80,10 @@ class FirestoreService {
         ])
     }
 
+    func deleteMatch(id: String) async throws {
+        try await db.collection("matches").document(id).delete()
+    }
+
     func createGames(_ games: [Game]) async throws {
         let batch = db.batch()
         for game in games {

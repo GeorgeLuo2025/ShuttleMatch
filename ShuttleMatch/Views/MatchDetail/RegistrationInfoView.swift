@@ -132,7 +132,16 @@ struct RegistrationInfoView: View {
             Text("Team match requires an even number of players to split evenly into two teams. You currently have \(playerCount) players — please add or remove one.")
         }
         .onAppear { initializeFromMatch() }
+        .onDisappear { saveSettings() }
         .onChange(of: matchVM.currentMatch?.id) { _, _ in initializeFromMatch() }
+        .onChange(of: customPointsPerGame) { _, _ in saveSettings() }
+        .onChange(of: customGamesPerMatch) { _, _ in saveSettings() }
+        .onChange(of: deuceEnabled) { _, _ in saveSettings() }
+        .onChange(of: selectedRounds) { _, _ in saveSettings() }
+        .onChange(of: singlesCount) { _, _ in saveSettings() }
+        .onChange(of: doublesCount) { _, _ in saveSettings() }
+        .onChange(of: teamAName) { _, _ in saveSettings() }
+        .onChange(of: teamBName) { _, _ in saveSettings() }
     }
 
     // MARK: - Player Sections
@@ -244,7 +253,25 @@ struct RegistrationInfoView: View {
         hasInitialized = true
     }
 
-    private func saveSettings() {}
+    private func saveSettings() {
+        guard isRegistration && isOrganizer else { return }
+        let rule: ScoringRule = useStandardScoring ? .standard : ScoringRule(
+            pointsPerGame: customPointsPerGame,
+            gamesPerMatch: customGamesPerMatch,
+            deuceEnabled: deuceEnabled,
+            deuceCapPoints: deuceEnabled ? customPointsPerGame + 9 : nil
+        )
+        let rounds = (match?.type == .team) ? (singlesCount + doublesCount) : selectedRounds
+        Task {
+            await matchVM.saveMatchSettings(
+                name: matchName,
+                scoringRule: rule,
+                rounds: rounds,
+                teamAName: (match?.type == .team) ? teamAName : nil,
+                teamBName: (match?.type == .team) ? teamBName : nil
+            )
+        }
+    }
 
     private func generateMatchups() async {
         // Team match: enforce even player count

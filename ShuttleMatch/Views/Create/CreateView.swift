@@ -41,7 +41,7 @@ struct CreateView: View {
             .navigationTitle(String(localized: "create_match_title"))
             .navigationDestination(isPresented: $isNavigating) {
                 if let match = navigateToMatch {
-                    MatchDetailView(matchID: match.id)
+                    MatchDetailView(matchID: match.id, isNewMatch: true)
                 }
             }
         }
@@ -59,6 +59,10 @@ struct CreateView: View {
             isNavigating = true
         }
     }
+}
+
+#Preview {
+    CreateView()
 }
 
 extension MatchType {

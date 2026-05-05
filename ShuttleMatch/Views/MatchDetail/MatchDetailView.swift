@@ -1,9 +1,25 @@
 import SwiftUI
 
+#Preview {
+    NavigationStack {
+        MatchDetailView(matchID: "preview_id", isNewMatch: false)
+    }
+}
+
 struct MatchDetailView: View {
     let matchID: String
+    var isNewMatch: Bool = false
+
     @StateObject private var matchVM = MatchViewModel()
+    @Environment(\.dismiss) private var dismiss
     @State private var selectedTab = 0
+    @State private var showKeepAlert = false
+
+    private var shouldConfirmOnBack: Bool {
+        isNewMatch &&
+        matchVM.currentMatch?.status == .registration &&
+        matchVM.games.isEmpty
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,7 +35,7 @@ struct MatchDetailView: View {
                 Spacer()
                 ProgressView()
                 Spacer()
-            } else if let match = matchVM.currentMatch {
+            } else if matchVM.currentMatch != nil {
                 switch selectedTab {
                 case 0:
                     RegistrationInfoView(matchVM: matchVM)
@@ -32,9 +48,39 @@ struct MatchDetailView: View {
                 }
             }
         }
-        .navigationTitle(matchVM.currentMatch?.name ?? String(localized: "match_detail_title"))
+        .navigationTitle(matchVM.currentMatch?.name.isEmpty == false
+            ? matchVM.currentMatch!.name
+            : String(localized: "match_detail_title"))
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(shouldConfirmOnBack)
         .toolbarVisibility(.hidden, for: .tabBar)
+        .toolbar {
+            if shouldConfirmOnBack {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        showKeepAlert = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                            Text(String(localized: "create_tab"))
+                        }
+                    }
+                }
+            }
+        }
+        .alert(String(localized: "keep_match_alert_title"), isPresented: $showKeepAlert) {
+            Button(String(localized: "keep_match_yes")) {
+                dismiss()
+            }
+            Button(String(localized: "keep_match_no"), role: .destructive) {
+                Task {
+                    await matchVM.deleteMatch()
+                    dismiss()
+                }
+            }
+        } message: {
+            Text(String(localized: "keep_match_alert_message"))
+        }
         .task {
             await matchVM.loadMatchDetail(matchID: matchID)
         }

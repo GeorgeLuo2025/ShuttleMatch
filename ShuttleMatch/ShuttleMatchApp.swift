@@ -11,6 +11,7 @@ struct ShuttleMatchApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(AuthViewModel())
+                .tint(.courtGreen)
         }
     }
 }

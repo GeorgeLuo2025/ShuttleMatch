@@ -1,27 +1,67 @@
 import SwiftUI
+import FirebaseAuth
 
 struct MatchListView: View {
     @StateObject private var matchVM = MatchViewModel()
+    @State private var selectedTab = 0
+    @State private var matchToDelete: Match? = nil
+
+    private var currentUserID: String? { Auth.auth().currentUser?.uid }
+
+    private var organizedMatches: [Match] {
+        matchVM.matches.filter { $0.organizerID == currentUserID }
+    }
+
+    private var joinedMatches: [Match] {
+        matchVM.matches.filter {
+            $0.playerIDs.contains(currentUserID ?? "")
+        }
+    }
 
     var body: some View {
         NavigationStack {
-            Group {
+            VStack(spacing: 0) {
+                Picker("", selection: $selectedTab) {
+                    Text(String(localized: "tab_my_organized")).tag(0)
+                    Text(String(localized: "tab_my_joined")).tag(1)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+
                 if matchVM.isLoading {
+                    Spacer()
                     ProgressView()
-                } else if matchVM.matches.isEmpty {
-                    ContentUnavailableView(
-                        String(localized: "no_matches_title"),
-                        systemImage: "figure.badminton",
-                        description: Text(String(localized: "no_matches_description"))
-                    )
+                    Spacer()
                 } else {
-                    List(matchVM.matches) { match in
-                        NavigationLink(value: match) {
-                            MatchRowView(match: match)
+                    let displayList = selectedTab == 0 ? organizedMatches : joinedMatches
+
+                    if displayList.isEmpty {
+                        ContentUnavailableView(
+                            String(localized: "no_matches_title"),
+                            systemImage: "figure.badminton",
+                            description: Text(selectedTab == 0
+                                ? String(localized: "no_organized_matches_description")
+                                : String(localized: "no_joined_matches_description"))
+                        )
+                    } else {
+                        List(displayList) { match in
+                            NavigationLink(value: match) {
+                                MatchRowView(match: match)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                if selectedTab == 0 {
+                                    Button(role: .destructive) {
+                                        matchToDelete = match
+                                    } label: {
+                                        Label(String(localized: "delete_button"), systemImage: "trash")
+                                    }
+                                }
+                            }
                         }
-                    }
-                    .navigationDestination(for: Match.self) { match in
-                        MatchDetailView(matchID: match.id)
+                        .navigationDestination(for: Match.self) { match in
+                            MatchDetailView(matchID: match.id)
+                        }
                     }
                 }
             }
@@ -31,6 +71,22 @@ struct MatchListView: View {
             }
             .refreshable {
                 await matchVM.loadMatches()
+            }
+            .alert(String(localized: "delete_match_alert_title"), isPresented: Binding(
+                get: { matchToDelete != nil },
+                set: { if !$0 { matchToDelete = nil } }
+            )) {
+                Button(String(localized: "delete_button"), role: .destructive) {
+                    if let match = matchToDelete {
+                        Task { await matchVM.deleteMatchByID(match.id) }
+                    }
+                    matchToDelete = nil
+                }
+                Button(String(localized: "cancel_button"), role: .cancel) {
+                    matchToDelete = nil
+                }
+            } message: {
+                Text(String(localized: "delete_match_alert_message"))
             }
         }
     }
@@ -42,7 +98,7 @@ struct MatchRowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(match.name)
+                Text(match.name.isEmpty ? String(localized: "unnamed_match") : match.name)
                     .font(.headline)
                 Spacer()
                 Text(match.status.localizedLabel)

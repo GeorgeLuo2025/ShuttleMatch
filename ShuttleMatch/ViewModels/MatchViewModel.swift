@@ -21,8 +21,6 @@ class MatchViewModel: ObservableObject {
         Auth.auth().currentUser?.uid
     }
 
-    // MARK: - Match CRUD
-
     func loadMatches() async {
         guard let uid = currentUserID else { return }
         isLoading = true
@@ -52,7 +50,6 @@ class MatchViewModel: ObservableObject {
             match.teamB = TeamInfo(name: bName, captainID: "", memberIDs: [])
             match.teamMatchSlots = teamMatchSlots
         } else if type == .team {
-            // Default empty team info so we can populate later
             match.teamA = TeamInfo(name: "", captainID: uid, memberIDs: [])
             match.teamB = TeamInfo(name: "", captainID: "", memberIDs: [])
         }
@@ -64,6 +61,45 @@ class MatchViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             return nil
+        }
+    }
+
+    func saveMatchSettings(name: String, scoringRule: ScoringRule, rounds: Int,
+                           teamAName: String? = nil, teamBName: String? = nil) async {
+        guard isRegistration, var match = currentMatch else { return }
+        match.name = name
+        match.scoringRule = scoringRule
+        match.rounds = rounds
+        if let a = teamAName { match.teamA?.name = a }
+        if let b = teamBName { match.teamB?.name = b }
+        do {
+            try await service.updateMatch(match)
+            currentMatch = match
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private var isRegistration: Bool {
+        currentMatch?.status == .registration
+    }
+
+    func deleteMatch() async {
+        guard let match = currentMatch else { return }
+        do {
+            try await service.deleteMatch(id: match.id)
+            matches.removeAll { $0.id == match.id }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func deleteMatchByID(_ matchID: String) async {
+        do {
+            try await service.deleteMatch(id: matchID)
+            matches.removeAll { $0.id == matchID }
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -118,8 +154,6 @@ class MatchViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Generate Matchups (dispatcher)
-
     func generateMatchups() async {
         guard var match = currentMatch else { return }
 
@@ -148,20 +182,9 @@ class MatchViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Team Match Generation
-    //
-    // Steps:
-    //  1. Randomly shuffle all playerIDs and split evenly: first half → Team A, second half → Team B.
-    //  2. Persist the team membership back to Firestore.
-    //  3. For each TeamMatchSlot (singles / doubles), assign players from each team
-    //     and create one Game per slot.
-    //     - Singles slot: 1 player from A vs 1 player from B (cycle through members)
-    //     - Doubles slot: 2 players from A vs 2 players from B (cycle through members)
-
     private func generateTeamMatchups(match: inout Match) async {
         let playerIDs = match.playerIDs
 
-        // Enforce even count (UI already guards this, but double-check here)
         guard playerIDs.count % 2 == 0 else {
             errorMessage = "团队赛需要偶数名球员"
             return
@@ -171,7 +194,6 @@ class MatchViewModel: ObservableObject {
             return
         }
 
-        // 1. Random split
         let shuffled = playerIDs.shuffled()
         let half = shuffled.count / 2
         let teamAIDs = Array(shuffled[0..<half])
@@ -180,10 +202,7 @@ class MatchViewModel: ObservableObject {
         match.teamA?.memberIDs = teamAIDs
         match.teamB?.memberIDs = teamBIDs
 
-        // 2. Generate one game per slot
         var allGames: [Game] = []
-
-        // We cycle through team members so slots are spread evenly
         var aIndex = 0
         var bIndex = 0
 
@@ -195,14 +214,12 @@ class MatchViewModel: ObservableObject {
 
             switch slot.slotType {
             case .singles:
-                // 1 vs 1
                 teamAPlayers = [teamAIDs[aIndex % teamAIDs.count]]
                 teamBPlayers = [teamBIDs[bIndex % teamBIDs.count]]
                 aIndex += 1
                 bIndex += 1
 
             case .doubles:
-                // Need at least 2 per team; if team too small, fall back to singles
                 if teamAIDs.count >= 2 && teamBIDs.count >= 2 {
                     let a1 = teamAIDs[aIndex % teamAIDs.count]
                     let a2 = teamAIDs[(aIndex + 1) % teamAIDs.count]
@@ -230,14 +247,12 @@ class MatchViewModel: ObservableObject {
             allGames.append(game)
         }
 
-        // 3. Persist everything
         do {
             try await service.updateMatch(match)
             try await service.createGames(allGames)
             match.status = .ongoing
             try await service.updateMatch(match)
             currentMatch = match
-            // Refresh players so team sections display correctly
             players = try await service.getPlayers(ids: match.playerIDs)
             games = allGames
             computeLeaderboard()
@@ -245,8 +260,6 @@ class MatchViewModel: ObservableObject {
             errorMessage = error.localizedDescription
         }
     }
-
-    // MARK: - Singles League (Round Robin)
 
     private func generateSinglesGames(match: Match) -> [Game] {
         let playerIDs = match.playerIDs
@@ -284,8 +297,6 @@ class MatchViewModel: ObservableObject {
         }
         return allGames
     }
-
-    // MARK: - Doubles League (Rotating Partners)
 
     private func generateDoublesGames(match: Match) -> [Game] {
         var playerIDs = match.playerIDs
@@ -376,8 +387,6 @@ class MatchViewModel: ObservableObject {
         return scheduledGames
     }
 
-    // MARK: - Combinatorics Helper
-
     private func combinations<T>(of array: [T], choosing k: Int) -> [[T]] {
         guard k > 0, k <= array.count else { return k == 0 ? [[]] : [] }
         if k == array.count { return [array] }
@@ -392,8 +401,6 @@ class MatchViewModel: ObservableObject {
         combine(start: 0, current: [])
         return result
     }
-
-    // MARK: - Score Saving
 
     func saveScoreDraft(game: Game, scores: [GameScore]) async {
         do {
@@ -436,8 +443,6 @@ class MatchViewModel: ObservableObject {
             return false
         }
     }
-
-    // MARK: - Score Validation
 
     func validateScores(scores: [GameScore], rule: ScoringRule) -> String? {
         guard !scores.isEmpty else {
@@ -501,8 +506,6 @@ class MatchViewModel: ObservableObject {
         }
         return aWins >= winsNeeded || bWins >= winsNeeded
     }
-
-    // MARK: - Leaderboard
 
     func computeLeaderboard() {
         guard let match = currentMatch else { return }
